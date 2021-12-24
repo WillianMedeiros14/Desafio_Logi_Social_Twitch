@@ -36,11 +36,31 @@ function AuthProvider({ children }: AuthProviderData) {
   const [user, setUser] = useState({} as User);
   const [userToken, setUserToken] = useState('');
 
+  const { CLIENT_ID } = process.env;
+
   // get CLIENT_ID from environment variables
+  const REDIRECT_URI = 'https://auth.expo.io/@willianmedeiros/streamData';
+  const RESPONSE_TYPE = 'token';
+  const SCOPE = encodeURI('openid user:read:email user:read:follows');
+  const FORCE_VERIFY = 'true'
+  const STATE = generateRandom(30);
+
+  const authUrl = twitchEndpoints.authorization + 
+  `?client_id=${CLIENT_ID}` + 
+  `&redirect_uri=${REDIRECT_URI}` + 
+  `&response_type=${RESPONSE_TYPE}` + 
+  `&scope=${SCOPE}` + 
+  `&force_verify=${FORCE_VERIFY}` +
+  `&state=${STATE}`;
+
+  useEffect(() => {
+    api.defaults.headers['Client-Id'] = CLIENT_ID;
+  }, [])
 
   async function signIn() {
     try {
       // set isLoggingIn to true
+      setIsLoggingIn(true);
 
       // REDIRECT_URI - create OAuth redirect URI using makeRedirectUri() with "useProxy" option set to true
       // RESPONSE_TYPE - set to "token"
@@ -52,6 +72,19 @@ function AuthProvider({ children }: AuthProviderData) {
       // redirect_uri, response_type, scope, force_verify and state
 
       // call startAsync with authUrl
+      const responseStartAsync = await startAsync({authUrl});
+
+      if(responseStartAsync.type == 'success' && responseStartAsync.params.error != 'access_denied'){
+        if(responseStartAsync.params.state != STATE){
+           throw(Error('Invalid state value'));
+        }
+        api.defaults.headers.authorization = `Bearer ${responseStartAsync.params.access_token}`;
+        const userResponse = await api.get('/users');
+
+        setUser(userResponse.data.data[0]);
+
+        setUserToken(responseStartAsync.params.access_token)
+      }
 
       // verify if startAsync response.type equals "success" and response.params.error differs from "access_denied"
       // if true, do the following:
@@ -67,25 +100,35 @@ function AuthProvider({ children }: AuthProviderData) {
         // set user state with response from Twitch API's route "/users"
         // set userToken state with response's access_token from startAsync
     } catch (error) {
-      // throw an error
+      throw Error('');
     } finally {
       // set isLoggingIn to false
+      setIsLoggingIn(false);
     }
   }
 
   async function signOut() {
     try {
       // set isLoggingOut to true
+      setIsLoggingOut(true);
 
-      // call revokeAsync with access_token, client_id and twitchEndpoint revocation
+      // call revokeAsync with access_token, client_id and twitchEndpoint 
+      const response = await revokeAsync(
+        {token: userToken, clientId: CLIENT_ID},
+        {revocationEndpoint: twitchEndpoints.revocation}
+      );
     } catch (error) {
     } finally {
       // set user state to an empty User object
+      setUser({} as User);
       // set userToken state to an empty string
+      setUserToken('');
 
       // remove "access_token" from request's authorization header
+      delete api.defaults.headers.authorization;
 
       // set isLoggingOut to false
+      setIsLoggingOut(false);
     }
   }
 
